@@ -29,6 +29,8 @@ MAYBE = "#f6d77a"
 TODAY_ACCENT = "#ffd400"
 TOMORROW_ACCENT = "#c9d3e0"
 LINE_COLORS = ["#2f6fed", "#e8590c", "#2b8a3e", "#9c36b5"]
+NOW = "#e03131"
+NOW_TINT = "#fde2e2"
 
 FONT_DIRS = [
     "/usr/share/fonts/noto/NotoSans-{}.ttf",
@@ -87,7 +89,24 @@ def _vertical_text(img: Image.Image, text: str, x: int, y: int, w: int, h: int, 
     img.paste(tmp, (x, y), tmp)
 
 
-def _day_block(img, draw, top: int, title: str, accent: str, sched, day, f) -> int:
+def _now_marker(draw, x0: int, top: int, h: int, now: datetime, f) -> None:
+    """Червона риска поточного часу через шапку й рядки + підпис під таблицею."""
+    x = x0 + LABEL_W + (now.hour + now.minute / 60) * CELL_W
+    draw.line((x, top, x, top + h), fill="#ffffff", width=6 * S)
+    draw.line((x, top, x, top + h), fill=NOW, width=3 * S)
+    r = 5 * S
+    draw.ellipse((x - r, top - r, x + r, top + r), fill=NOW)
+    label = f"{now:%H:%M}"
+    tw = draw.textlength(label, font=f["now"])
+    pw, ph = tw + 14 * S, 22 * S
+    # не виходимо за межі таблиці
+    px = min(max(x - pw / 2, x0 + LABEL_W), x0 + LABEL_W + 24 * CELL_W - pw)
+    py = top + h + 3 * S
+    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=ph / 2, fill=NOW)
+    draw.text((px + pw / 2, py + ph / 2), label, font=f["now"], fill="#ffffff", anchor="mm")
+
+
+def _day_block(img, draw, top: int, title: str, accent: str, sched, day, f, now=None) -> int:
     width = img.width
     table_w = LABEL_W + 24 * CELL_W
     x0 = PAD
@@ -117,6 +136,11 @@ def _day_block(img, draw, top: int, title: str, accent: str, sched, day, f) -> i
     draw.rounded_rectangle(
         (x0, top, x0 + table_w, top + h), radius=10 * S, fill=CARD, outline=GRID, width=S
     )
+
+    if now:
+        # підсвітка поточної години в шапці
+        cx = x0 + LABEL_W + now.hour * CELL_W
+        draw.rectangle((cx, top + S, cx + CELL_W, top + HEAD_H), fill=NOW_TINT)
 
     # Шапка з годинами
     draw.text(
@@ -170,11 +194,15 @@ def _day_block(img, draw, top: int, title: str, accent: str, sched, day, f) -> i
         if r < rows - 1:
             # чітке розділення між лініями
             draw.line((x0, y + ROW_H, x0 + table_w, y + ROW_H), fill=TEXT, width=2 * S)
+    if now:
+        _now_marker(draw, x0, top, h, now, f)
     return top + h
 
 
-def render(sched, title: str) -> bytes:
+def render(sched, title: str, now: datetime | None = None) -> bytes:
+    now = (now or datetime.now(KYIV)).astimezone(KYIV)
     f = {
+        "now": _font(12, True),
         "h1": _font(20, True),
         "title": _font(17, True),
         "label": _font(14),
@@ -193,11 +221,26 @@ def render(sched, title: str) -> bytes:
     draw = ImageDraw.Draw(img)
 
     draw.text((PAD, PAD), title, font=f["h1"], fill=TEXT)
-    draw.text((PAD, PAD + 32 * S), f"Оновлення ДТЕК: {sched.updated}", font=f["label"], fill=MUTED)
+    draw.text(
+        (PAD, PAD + 32 * S),
+        f"Графік оновлено ДТЕК: {sched.updated}  ·  Зараз (Київ): {now:%d.%m.%Y %H:%M}",
+        font=f["label"],
+        fill=MUTED,
+    )
 
     y = PAD + 60 * S
+    # риску малюємо лише якщо "сьогодні" з графіка справді збігається з поточною датою
+    is_today = datetime.fromtimestamp(sched.today, KYIV).date() == now.date()
     y = _day_block(
-        img, draw, y, f"Сьогодні · {day_title(sched.today)}", TODAY_ACCENT, sched, sched.today, f
+        img,
+        draw,
+        y,
+        f"Сьогодні · {day_title(sched.today)}",
+        TODAY_ACCENT,
+        sched,
+        sched.today,
+        f,
+        now if is_today else None,
     )
     y += DAY_GAP
     tomorrow_title = f"Завтра · {day_title(sched.tomorrow)}" if sched.tomorrow else "Завтра"
