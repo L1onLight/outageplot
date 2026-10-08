@@ -2,7 +2,9 @@
 
 Запускається раз на 30 хв (systemd timer / cron) або з --loop.
 - Перший запуск за добу -> нове повідомлення з картинкою.
-- Якщо графік (або лінії sub_type_reason) змінився -> редагуємо це повідомлення.
+- Кожен наступний запуск -> редагуємо це повідомлення (на картинці позначка
+  поточного часу). Примітка «Графік оновився» з'являється лише коли графік
+  (або лінії sub_type_reason) справді змінився і лишається до наступної зміни.
 - Якщо повідомлення видалили -> надсилаємо заново.
 - Застарілі/неповні дані з сайту (кеш, порожні відповіді) ігноруємо.
 """
@@ -142,28 +144,12 @@ def edit(message_id: int, photo: bytes, text: str) -> None:
     )
 
 
-def message_exists(message_id: int) -> bool:
-    """Bot API не вміє читати повідомлення, тому пробуємо «порожнє» редагування:
-    існуюче дає "message is not modified", видалене - "message to edit not found"."""
-    try:
-        tg(
-            "editMessageReplyMarkup",
-            {"chat_id": CHAT_ID, "message_id": message_id, "reply_markup": "{}"},
-        )
-        return True
-    except TgError as e:
-        if e.not_modified:
-            return True
-        if e.gone:
-            return False
-        raise
-
-
-def fresh_state(s: dtek.Schedule, message_id: int, sig: str) -> dict:
+def fresh_state(s: dtek.Schedule, message_id: int, sig: str, note: str | None = None) -> dict:
     return {
         "day": s.today,
         "message_id": message_id,
         "sig": sig,
+        "note": note,
         "lines": s.lines,
         "updated": s.updated,
         "has_tomorrow": has_day(s, s.tomorrow),
@@ -206,43 +192,33 @@ def check(force: bool = False) -> None:
         log(f"Ігнорую відповідь сайту: {reason}")
         return
 
-    if not message_exists(state["message_id"]):
-        mid = send(render(s, title), caption(s, None))
-        log(f"Повідомлення {state['message_id']} видалене - перевідправив як {mid}")
-        save_state(fresh_state(s, mid, sig))
-        return
-
     if state.get("sig") == sig:
-        log("Без змін")
-        return
+        # Графік той самий - оновлюємо лише позначку часу, примітку лишаємо попередню
+        note = state.get("note")
+    else:
+        note = f"Графік оновився о {datetime.now(KYIV):%H:%M}"
+        if sorted(state.get("lines", [])) != sorted(s.lines):
+            note += " (змінились лінії)"
 
-    note = f"Графік оновився о {datetime.now(KYIV):%H:%M}"
-    if sorted(state.get("lines", [])) != sorted(s.lines):
-        note += " (змінились лінії)"
     try:
         edit(state["message_id"], render(s, title), caption(s, note))
-        log(f"Оновлено повідомлення {state['message_id']}")
+        log(
+            f"Оновлено повідомлення {state['message_id']}"
+            + (" (новий графік)" if state.get("sig") != sig else "")
+        )
     except TgError as e:
-        if e.not_modified:
-            # у повідомленні вже саме це - лише фіксуємо стан, без сповіщення
-            log("Повідомлення вже актуальне")
-            state.update(
-                sig=sig,
-                lines=s.lines,
-                updated=s.updated,
-                has_tomorrow=has_day(s, s.tomorrow),
-            )
-            save_state(state)
+        if e.gone:
+            mid = send(render(s, title), caption(s, note))
+            log(f"Повідомлення {state['message_id']} недоступне - надіслав нове {mid}")
+            save_state(fresh_state(s, mid, sig, note))
             return
-        if not e.gone:
+        if not e.not_modified:
             raise  # тимчасова помилка (429, 5xx) - спробуємо наступного запуску
-        mid = send(render(s, title), caption(s, note))
-        log(f"Повідомлення не редагується ({e.description}) - надіслав нове {mid}")
-        save_state(fresh_state(s, mid, sig))
-        return
+        log("Повідомлення вже актуальне")
 
     state.update(
         sig=sig,
+        note=note,
         lines=s.lines,
         updated=s.updated,
         has_tomorrow=has_day(s, s.tomorrow),
