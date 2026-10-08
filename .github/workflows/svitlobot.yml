@@ -1,0 +1,93 @@
+# Перевірка графіка ДТЕК і надсилання в Telegram.
+#
+# Тригери:
+# - repository_dispatch (type: check) - основний, кожні 30 хв із зовнішнього cron
+#   (cron-job.org тощо), бо вбудований cron GitHub запізнюється і пропускає запуски;
+# - schedule - запасний, раз на годину;
+# - workflow_dispatch - ручний запуск (з опцією force).
+#
+# Стан (state.json) живе в окремій гілці `artifacts` з одним комітом без історії.
+
+name: svitlobot
+
+on:
+  repository_dispatch:
+    types: [check]
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Надіслати нове повідомлення примусово"
+        type: boolean
+        default: false
+
+concurrency:
+  group: svitlobot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      STREET: ${{ secrets.STREET }}
+      HOUSE: ${{ secrets.HOUSE }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
+      - name: Install Chromium and fonts
+        run: |
+          uv run playwright install --with-deps --only-shell chromium
+          sudo apt-get install -y --no-install-recommends fonts-noto-core
+
+      - name: Restore state
+        run: |
+          if git fetch --depth 1 origin artifacts 2>/dev/null; then
+            git show FETCH_HEAD:state.json > state.json
+            cp state.json "$RUNNER_TEMP/state.prev.json"
+          else
+            echo "Гілки artifacts ще немає - починаємо з порожнього стану"
+          fi
+
+      - name: Run bot
+        run: uv run python bot.py ${{ inputs.force && '--force' || '' }}
+
+      - name: Save state
+        if: always() && hashFiles('state.json') != ''
+        run: |
+          if cmp -s state.json "$RUNNER_TEMP/state.prev.json"; then
+            echo "Стан не змінився"
+            exit 0
+          fi
+          export GIT_AUTHOR_NAME="github-actions[bot]" GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+          blob=$(git hash-object -w state.json)
+          tree=$(printf '100644 blob %s\tstate.json\n' "$blob" | git mktree)
+          commit=$(git commit-tree "$tree" -m "state: $(date -u +%FT%TZ)")
+          git push --force origin "$commit:refs/heads/artifacts"
+
+      - name: Keep workflow enabled
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/svitlobot.yml/enable"

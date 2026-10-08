@@ -1,0 +1,22 @@
+[project]
+name = "svitlobot-plot"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=12.3.0",
+    "playwright>=1.63.0",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+    "ruff>=0.16.10",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]

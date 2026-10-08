@@ -1,0 +1,39 @@
+# Встановлення: uv sync && uv run pre-commit install
+# Ручний прогін по всьому репо: uv run pre-commit run --all-files
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: forbid-local-files
+        name: forbid .env / state.json
+        entry: "Ці файли локальні й не комітяться"
+        language: fail
+        files: (^|/)(\.env(\..*)?|state\.json|state\.tmp|\.lock)$
+        exclude: \.env\.example$
+
+      - id: env-values
+        name: no .env values in files
+        entry: python scripts/check_env_leaks.py
+        language: python
+        additional_dependencies: [python-dotenv]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
