@@ -29,6 +29,7 @@ _JS_FETCH = """async ([street, house]) => {
     return {
         home: homes.data?.[house] ?? null,
         houses: Object.keys(homes.data ?? {}),
+        outageUpdated: homes.updateTimestamp ?? '',
         fact: DisconSchedule.fact,
         names: DisconSchedule.preset?.sch_names ?? {},
     };
@@ -43,7 +44,20 @@ class Schedule:
     tomorrow: int | None
     days: dict[int, dict[str, dict[str, str]]]  # день -> лінія -> {"1".."24": стан}
     updated: str  # "08.10.2026 08:01"
-    home: dict
+    home: dict  # запис будинку з getHomeNum (sub_type, start_date, end_date, ...)
+    outage_updated: str = ""  # "03:17 09.10.2026" - час оновлення даних про поточне відключення
+
+    @property
+    def outage(self) -> dict | None:
+        """Поточне відключення за адресою або None, якщо світло є."""
+        h = self.home
+        if not (h.get("sub_type") and h.get("start_date")):
+            return None
+        return {
+            "type": h["sub_type"],
+            "start": h["start_date"],
+            "end": h.get("end_date") or "",
+        }
 
     def slots(self, day: int | None, line: str) -> dict[str, str] | None:
         if day is None:
@@ -80,4 +94,5 @@ def fetch(street: str, house: str) -> Schedule:
         days=days,
         updated=fact.get("update", ""),
         home=res["home"],
+        outage_updated=res.get("outageUpdated") or "",
     )
