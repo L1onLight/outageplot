@@ -57,6 +57,8 @@ PING_INTERVAL = 60 * 60  # пінг про перенесення часу - н�
 RESTORE_AFTER = 2  # стільки перевірок поспіль без відключення = світло відновлено
 # sub_type відключень за графіком - вони вже є на картинці, окремо не сповіщаємо
 SCHEDULED_MARKERS = ("графік", "стабілізаційн")
+# Заглушка адреси в тексті, що зберігається в state.json: гілка artifacts у форку публічна
+ADDRESS = "{address}"
 
 
 class TgError(RuntimeError):
@@ -258,13 +260,18 @@ def regression(s: dtek.Schedule, state: dict) -> str | None:
     return None
 
 
+def with_address(text: str) -> str:
+    return text.replace(ADDRESS, f"{STREET}, {HOUSE}")
+
+
 def outage_text(st: dict, now: datetime) -> str:
+    """Текст із заглушкою ADDRESS замість адреси; перед відправкою - with_address()."""
     restored = st.get("restored_at")
     if restored:
-        parts = [f"✅ <b>Світло відновлено ~{restored}</b>", f"💡 {STREET}, {HOUSE}", ""]
+        parts = [f"✅ <b>Світло відновлено ~{restored}</b>", f"💡 {ADDRESS}", ""]
         parts.append(f"Причина: {html.escape(st['type'])}")
     else:
-        parts = [f"⚡ <b>Світла немає: {html.escape(st['type'])}</b>", f"💡 {STREET}, {HOUSE}", ""]
+        parts = [f"⚡ <b>Світла немає: {html.escape(st['type'])}</b>", f"💡 {ADDRESS}", ""]
     parts.append(f"З {short(st['start'])}")
     if ends := st["ends"]:
         # Попередні обіцянки закреслені; лише останні дві, щоб рядок не розростався
@@ -317,7 +324,7 @@ def check_outage(s: dtek.Schedule, state: dict) -> None:
                 "updated": s.outage_updated,
             }
             st["text"] = outage_text(st, now)
-            st["message_id"] = send_text(st["text"])
+            st["message_id"] = send_text(with_address(st["text"]))
             state["outage"] = st
             log(f"Нове повідомлення про відключення {st['message_id']}")
             return
@@ -356,11 +363,11 @@ def check_outage(s: dtek.Schedule, state: dict) -> None:
     if text == st.get("text"):
         return
     try:
-        edit_text(st["message_id"], text)
+        edit_text(st["message_id"], with_address(text))
         log(f"Оновлено повідомлення про відключення {st['message_id']}")
     except TgError as e:
         if e.gone and not st.get("restored_at"):
-            st["message_id"] = send_text(text)
+            st["message_id"] = send_text(with_address(text))
             log(f"Повідомлення про відключення зникло - надіслав нове {st['message_id']}")
         elif not (e.gone or e.not_modified):
             raise
@@ -447,7 +454,7 @@ def main() -> None:
         if (o := s.outage) and unscheduled(o):
             st = {"type": o["type"], "start": o["start"], "ends": [o["end"]] if o["end"] else []}
             st["updated"] = s.outage_updated
-            print("\n---\n" + outage_text(st, datetime.now(KYIV)))
+            print("\n---\n" + with_address(outage_text(st, datetime.now(KYIV))))
         return
 
     # Один екземпляр одночасно (timer + --loop не задублюють повідомлення)

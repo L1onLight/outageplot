@@ -32,6 +32,8 @@ LINE_COLORS = ["#2f6fed", "#e8590c", "#2b8a3e", "#9c36b5"]
 NOW = "#e03131"
 NOW_TINT = "#fde2e2"
 
+REPO = "github.com/L1onLight/outageplot"
+
 FONT_DIRS = [
     "/usr/share/fonts/noto/NotoSans-{}.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-{}.ttf",
@@ -272,6 +274,8 @@ def render(sched, title: str, now: datetime | None = None) -> bytes:
             draw.rectangle((x + box / 2, y, x + box, y + box), fill=b)
         draw.text((x + box + 8 * S, y + box / 2), label, font=f["small"], fill=TEXT, anchor="lm")
         x += box + 8 * S + int(draw.textlength(label, font=f["small"])) + 22 * S
+
+    draw.text((width - PAD, y + 11 * S), REPO, font=f["small"], fill=MUTED, anchor="rm")
 
     img = img.crop((0, 0, width, y + 22 * S + PAD))
     buf = io.BytesIO()
