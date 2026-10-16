@@ -1,6 +1,6 @@
 """Перевірка графіка відключень ДТЕК і надсилання в Telegram.
 
-Запускається раз на 30 хв (systemd timer / cron) або з --loop.
+Запускається раз на 30 хв (GitHub Actions / cron) або з --loop.
 - Перший запуск за добу -> нове повідомлення з картинкою.
 - Кожен наступний запуск -> редагуємо це повідомлення (на картинці позначка
   поточного часу). Примітка «Графік оновився» з'являється лише коли графік
@@ -161,8 +161,12 @@ def caption(s: dtek.Schedule, note: str | None) -> str:
 
 def tg(method: str, data: dict, photo: bytes | None = None) -> dict:
     files = {"photo": ("schedule.png", photo, "image/png")} if photo else None
-    r = requests.post(f"{API}/{method}", data=data, files=files, timeout=60)
-    res = r.json()
+    try:
+        r = requests.post(f"{API}/{method}", data=data, files=files, timeout=60)
+        res = r.json()
+    except requests.RequestException as e:  # мережа, не-JSON відповідь (502 від проксі тощо)
+        # лише назва помилки: у тексті requests є URL з токеном бота
+        raise TgError(method, f"{type(e).__name__} (мережа)") from e
     if not res.get("ok"):
         raise TgError(method, res.get("description", str(res)))
     return res["result"]
@@ -302,7 +306,9 @@ def check_outage(s: dtek.Schedule, state: dict) -> None:
         log(f"Відключення: {o}, оновлення ДТЕК: {s.outage_updated}")
     active = bool(st.get("message_id")) and not st.get("restored_at")
 
-    if o and unscheduled(o):
+    # Поки подія триває, будь-яке відключення - її продовження, навіть якщо ДТЕК
+    # перевів його в планове: світла ж досі немає
+    if o and (active or unscheduled(o)):
         if not active:
             st = {
                 "type": o["type"],
@@ -322,12 +328,14 @@ def check_outage(s: dtek.Schedule, state: dict) -> None:
         ends = st["ends"]
         if o["end"] and (not ends or ends[-1] != o["end"]):
             prev = parse_dtek_time(ends[-1]) if ends else None
-            ends.append(o["end"])
-            st["end_changed_at"] = f"{now:%H:%M}"
-            log(f"Час відновлення змінився: {ends}")
-            # Пінгуємо лише тих, хто вже дочекався обіцяного часу і не отримав світла
+            log(f"Час відновлення змінився: {ends} -> {o['end']}")
+            # Пінгуємо лише тих, хто вже дочекався обіцяного часу і не отримав світла.
+            # Пінг - до запису нового часу: якщо він впаде, наступний запуск побачить зміну знову
             if prev and prev < now and now.timestamp() - st.get("last_ping", 0) >= PING_INTERVAL:
                 ping(st, f"⏳ Час відновлення перенесено на <b>{short(o['end'])}</b>", now)
+            ends.append(o["end"])
+            st["end_changed_at"] = f"{now:%H:%M}"
+        st["updated"] = s.outage_updated or st.get("updated")
     elif active:
         st.setdefault("missing_since", f"{now:%H:%M}")
         st["missing"] = st.get("missing", 0) + 1
@@ -335,13 +343,15 @@ def check_outage(s: dtek.Schedule, state: dict) -> None:
             log(f"Відключення немає ({st['missing']}/{RESTORE_AFTER}) - чекаю підтвердження")
             return
         st["restored_at"] = st["missing_since"]
+        st["updated"] = s.outage_updated or st.get("updated")
         if ping_id := st.pop("ping_id", None):
             delete(ping_id)
         log(f"Світло відновлено ~{st['restored_at']}")
-    else:
+    elif not st.get("message_id"):
         return
+    # Інакше подія вже завершена: нижче лише повторимо редагування, якщо минулого
+    # разу воно не вдалося (тимчасова помилка Telegram)
 
-    st["updated"] = s.outage_updated or st.get("updated")
     text = outage_text(st, now)
     if text == st.get("text"):
         return

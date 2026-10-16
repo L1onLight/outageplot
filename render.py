@@ -81,21 +81,24 @@ def _bolt(draw: ImageDraw.ImageDraw, cx: float, cy: float, h: float, color: str)
     draw.polygon(pts, fill=color)
 
 
-def _vertical_text(img: Image.Image, text: str, x: int, y: int, w: int, h: int, font) -> None:
+def _vertical_text(
+    img: Image.Image, text: str, x: int, y: int, w: int, h: int, font, fill: str = TEXT
+) -> None:
     tmp = Image.new("RGBA", (h, w), (0, 0, 0, 0))
     d = ImageDraw.Draw(tmp)
-    d.text((h / 2, w / 2), text, font=font, fill=TEXT, anchor="mm")
+    d.text((h / 2, w / 2), text, font=font, fill=fill, anchor="mm")
     tmp = tmp.rotate(90, expand=True)
     img.paste(tmp, (x, y), tmp)
 
 
 def _now_marker(draw, x0: int, top: int, h: int, now: datetime, f) -> None:
-    """Червона риска поточного часу через шапку й рядки + підпис під таблицею."""
+    """Червона риска поточного часу через рядки (від низу шапки) + підпис під таблицею."""
     x = x0 + LABEL_W + (now.hour + now.minute / 60) * CELL_W
-    draw.line((x, top, x, top + h), fill="#ffffff", width=6 * S)
-    draw.line((x, top, x, top + h), fill=NOW, width=3 * S)
+    y0 = top + HEAD_H
+    draw.line((x, y0, x, top + h), fill="#ffffff", width=6 * S)
+    draw.line((x, y0, x, top + h), fill=NOW, width=3 * S)
     r = 5 * S
-    draw.ellipse((x - r, top - r, x + r, top + r), fill=NOW)
+    draw.ellipse((x - r, y0 - r, x + r, y0 + r), fill=NOW)
     label = f"{now:%H:%M}"
     tw = draw.textlength(label, font=f["now"])
     pw, ph = tw + 14 * S, 22 * S
@@ -152,7 +155,10 @@ def _day_block(img, draw, top: int, title: str, accent: str, sched, day, f, now=
     )
     for i in range(24):
         cx = x0 + LABEL_W + i * CELL_W
-        _vertical_text(img, f"{i:02d}-{i + 1:02d}", cx, top, CELL_W, HEAD_H, f["hour"])
+        if now and i == now.hour:  # поточна година - червоним жирним
+            _vertical_text(img, f"{i:02d}-{i + 1:02d}", cx, top, CELL_W, HEAD_H, f["hour_b"], NOW)
+        else:
+            _vertical_text(img, f"{i:02d}-{i + 1:02d}", cx, top, CELL_W, HEAD_H, f["hour"])
         draw.line((cx, top, cx, top + h), fill=GRID, width=S)
     draw.line((x0, top + HEAD_H, x0 + table_w, top + HEAD_H), fill=GRID, width=S)
 
@@ -209,6 +215,7 @@ def render(sched, title: str, now: datetime | None = None) -> bytes:
         "label_b": _font(14, True),
         "small": _font(12),
         "hour": _font(12),
+        "hour_b": _font(12, True),
     }
     table_w = LABEL_W + 24 * CELL_W
     width = table_w + 2 * PAD
