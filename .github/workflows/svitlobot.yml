@@ -1,9 +1,8 @@
 # Перевірка графіка ДТЕК і надсилання в Telegram.
 #
 # Тригери:
-# - repository_dispatch (type: check) - основний, кожні 30 хв із зовнішнього cron
+# - repository_dispatch (type: check) - кожні 30 хв із зовнішнього cron
 #   (cron-job.org тощо), бо вбудований cron GitHub запізнюється і пропускає запуски;
-# - schedule - запасний, раз на годину;
 # - workflow_dispatch - ручний запуск (з опцією force).
 #
 # Стан (state.json) живе в окремій гілці `artifacts` з одним комітом без історії.
@@ -13,8 +12,6 @@ name: svitlobot
 on:
   repository_dispatch:
     types: [check]
-  schedule:
-    - cron: "7 * * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -28,7 +25,6 @@ concurrency:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   check:
@@ -86,8 +82,3 @@ jobs:
           commit=$(git commit-tree "$tree" -m "state: $(date -u +%FT%TZ)")
           git push --force origin "$commit:refs/heads/artifacts"
 
-      - name: Keep workflow enabled
-        if: always() && github.event_name == 'schedule'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/svitlobot.yml/enable"

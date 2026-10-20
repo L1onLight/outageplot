@@ -118,9 +118,8 @@ uv run python bot.py --preview out.png  # лише зберегти картин
 ### GitHub Actions
 
 Workflow `.github/workflows/svitlobot.yml` запускає бота в хмарі:
-- `repository_dispatch` (type `check`) — основний тригер кожні 30 хв із зовнішнього cron
+- `repository_dispatch` (type `check`) — кожні 30 хв із зовнішнього cron
   (наприклад, cron-job.org), бо вбудований cron GitHub запізнюється;
-- `schedule` — запасний, щогодини (заодно не дає GitHub вимкнути workflow);
 - `workflow_dispatch` — ручний запуск з опцією `force`.
 
 Зовнішній cron має кожні 30 хв робити такий запит:
